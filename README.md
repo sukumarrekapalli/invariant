@@ -1,6 +1,6 @@
 # Invariant
 
-**Intelligence within. Voice intact.**
+**Write alone. Not unaided.**
 
 Invariant is an open-source writing environment whose core intelligence runs in the browser. It uses [Leanlet](https://sukumarrekapalli.github.io/leanlet/) to coordinate small, bounded capabilities rather than sending every interaction to a general-purpose inference API.
 
@@ -12,7 +12,10 @@ Invariant is an open-source writing environment whose core intelligence runs in 
 - exact grammar and spacing fixes, readability signals, and private-data preflight;
 - transparent correctness, clarity, and privacy scores;
 - on-demand definitions, synonyms, and antonyms from Princeton WordNet;
-- a bounded assistant that answers only from the current structured review;
+- a document-aware structured assistant for summaries, outlines, retrieval,
+  metrics, evidence-backed suggestions, and exact supported rewrites;
+- an optional Preview WebGPU SmolLM2 360M Instruct pack for broader English-first
+  questions and rewrites, downloaded only after the user selects it;
 - explicit abstention and quality warnings when a capability lacks coverage.
 
 Invariant does not claim that a clean report is error-free, that its score measures literary quality, or that the current English packs provide multilingual grammar support.
@@ -50,10 +53,20 @@ Invariant editor
 
 On demand
   ├─ writer.lexicon-en         lazy two-letter WordNet shard
-  └─ writer.assistant          bounded composition from report evidence
+  ├─ writer.assistant          structured document tools and evidence
+  └─ writer.generate-smollm2   optional WebGPU generative worker
 ```
 
-Leanlet owns orchestration, lifecycle, budgets, scheduling, coalescing, network policy, and typed results. Invariant owns writing policy, data packs, and product behavior. A missing generic runtime primitive must be implemented and released in Leanlet before it is consumed here; product-specific writing logic stays here.
+Leanlet owns orchestration, lifecycle, budgets, scheduling, coalescing, network
+policy, and typed results. Invariant owns writing policy, data packs, prompts,
+and product behavior. The optional model remains lazy and is disposed through
+the same kernel contract as the smaller workers.
+
+The structured assistant is the default because it is immediate, inspectable,
+and broadly compatible. Local generative Preview mode is opt-in: it requires WebGPU,
+downloads roughly 272 MB of quantized model weights plus tokenizer/runtime
+files, and may return inaccurate or meaning-changing text. Draft text is sent
+to neither an inference endpoint nor the model host.
 
 ## Documentation
 

@@ -17,7 +17,8 @@ const checks = [
   'Private-data preflight',
   'Language identification',
   'Definitions and word relations',
-  'Evidence-bound writing assistant',
+  'Document-aware local assistant',
+  'Optional generative rewrite pack',
 ];
 
 export default function Landing() {
@@ -42,26 +43,26 @@ export default function Landing() {
         <div className="hero-copy">
           <p className="overline">PRIVATE WRITING SOFTWARE</p>
           <h1>
-            Intelligence within.
+            Write alone.
             <br />
-            <em>Voice intact.</em>
+            <em>Not unaided.</em>
           </h1>
           <p className="hero-lead">
-            A focused writing environment with scoped intelligence that runs in
-            your browser. No account, usage meter, or inference API is required
-            for core checks.
+            Invariant is a local-first writing desk with intelligence built into
+            the browser. It reads the draft where you write it—without an
+            account, usage meter, or inference API for core review.
           </p>
           <div className="hero-actions">
             <a className="primary-link" href={`${base}/writer/`}>
-              Start a private draft <ArrowRight />
+              Open a private draft <ArrowRight />
             </a>
             <a className="text-link" href="#how">
               See the architecture
             </a>
           </div>
           <p className="precise-note">
-            <WifiOff /> First use downloads the application and selected
-            language assets. Analysis stays on this device.
+            <WifiOff /> Core review stays on this device. Optional generative
+            assistance downloads separately and never uploads the draft.
           </p>
         </div>
         <div
@@ -73,15 +74,15 @@ export default function Landing() {
             <span>Local review</span>
           </div>
           <div className="folio-page">
-            <span className="folio-kicker">A NOTE ON CRAFT</span>
+            <span className="folio-kicker">THE PRIVATE DRAFT</span>
             <h2>
-              Make the sentence
+              Keep the voice.
               <br />
-              carry its own weight.
+              Sharpen the line.
             </h2>
             <p>
-              Good tools should sharpen attention without taking the work away
-              from its author.
+              A quiet writing room, with just enough intelligence to notice what
+              the author may want to revisit.
             </p>
             <div className="folio-rule">
               <span>CLARITY</span>
@@ -100,7 +101,7 @@ export default function Landing() {
       </section>
       <section className="trust-strip">
         <span>
-          <CloudOff /> Core inference: browser-local
+          <CloudOff /> Draft text: not uploaded
         </span>
         <span>
           <Shield /> Draft storage: this device
@@ -121,10 +122,11 @@ export default function Landing() {
             the final authority.
           </h2>
           <p>
-            Invariant is not a text generator disguised as an editor. It
-            examines bounded questions—whether a word is misspelled, a sentence
-            is unusually dense, or a draft contains contact information—and
-            returns evidence you can accept or ignore.
+            Invariant begins with bounded questions—whether a word is
+            misspelled, a sentence is unusually dense, or a draft contains
+            contact information. When you explicitly ask for a broader rewrite,
+            an optional compact model runs beside those checks and leaves the
+            final choice with you.
           </p>
         </div>
       </section>
@@ -164,10 +166,10 @@ export default function Landing() {
             One coherent review.
           </h2>
           <p>
-            Invariant uses Leanlet to coordinate independent browser workers and
-            inspectable JavaScript checks. The kernel schedules work, shares
-            loaded resources, enforces network policy, and returns typed results
-            to the editor.
+            Invariant uses Leanlet to coordinate independent browser workers,
+            inspectable checks, and an optional compact writing model. The
+            kernel schedules work, shares loaded resources, enforces policy and
+            memory budgets, and returns typed results to the editor.
           </p>
         </div>
         <div className="architecture-flow">
@@ -192,6 +194,7 @@ export default function Landing() {
             <span>Spelling worker</span>
             <span>Clarity checks</span>
             <span>Privacy checks</span>
+            <span>Writer model · optional</span>
           </div>
           <div className="arch-line">
             <i />

@@ -9,7 +9,7 @@ const pages = {
 for (const [route, metadata] of Object.entries(pages)) {
   await mkdir(new URL(`${route}/`, output), { recursive: true });
   const html = source
-    .replace('<title>Invariant — Private writing intelligence</title>', `<title>${metadata.title}</title>`)
+    .replace('<title>Invariant — Private, local-first writing software</title>', `<title>${metadata.title}</title>`)
     .replace('Invariant is a private writing environment with scoped intelligence running in your browser.', metadata.description)
     .replace('https://sukumarrekapalli.github.io/invariant/', `https://sukumarrekapalli.github.io/invariant/${route}/`);
   await writeFile(new URL(`${route}/index.html`, output), html);

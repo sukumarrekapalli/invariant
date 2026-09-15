@@ -14,8 +14,11 @@ import {
   textMetrics,
 } from './analyzers.ts';
 import {
+  ASSISTANT_ENGINES,
   LANGUAGE_PROFILES,
+  type AssistantEngineId,
   type AssistantReply,
+  type AssistantRequest,
   type LanguageProfileId,
   type LanguageResult,
   type LexiconResult,
@@ -23,11 +26,16 @@ import {
   type WriterFinding,
   type WriterReport,
 } from './writer-types.ts';
+import {
+  answerFromDocument,
+  isRewriteRequest,
+} from './document-assistant.ts';
 /* oxlint-disable import/default -- Vite's ?worker query provides constructor default exports. */
 import ExtraSmallLanguageWorker from './language-extrasmall.worker.ts?worker';
 import SmallLanguageWorker from './language-small.worker.ts?worker';
 import MediumLanguageWorker from './language-medium.worker.ts?worker';
 import SpellingWorker from './spelling.worker.ts?worker';
+import GenerationWorker from './generation.worker.ts?worker';
 /* oxlint-enable import/default */
 
 type LanguageWorkerMessage =
@@ -222,61 +230,107 @@ function languageFinding(language: LanguageResult): WriterFinding[] {
   ];
 }
 
-function assistantResponse(
-  question: string,
-  report: WriterReport,
-): AssistantReply {
-  const intent = question.toLocaleLowerCase();
-  const select = (categories: WriterFinding['category'][]) =>
-    report.findings.filter((item) => categories.includes(item.category));
-  let findings: WriterFinding[] = [];
-  let lead = '';
-  if (/private|privacy|secret|sensitive|safe|share|send/.test(intent)) {
-    findings = select(['privacy']);
-    lead = findings.length
-      ? `I found ${findings.length} privacy item${findings.length === 1 ? '' : 's'} to review before sharing.`
-      : 'The configured local privacy checks found no matching signals.';
-  } else if (/hard|read|clear|clarity|sentence|concise/.test(intent)) {
-    findings = select(['readability', 'style']);
-    lead = findings.length
-      ? `I found ${findings.length} clarity or style observation${findings.length === 1 ? '' : 's'}.`
-      : 'The configured clarity checks found no current issues.';
-  } else if (/language|locale/.test(intent)) {
-    findings = select(['language']);
-    lead = report.language.reliable
-      ? `The ${report.language.profileId.replace('eld-', '')} local profile identifies this as ${report.language.language}.`
-      : (report.language.warning ?? 'The language result needs confirmation.');
-  } else if (/grammar|spelling|punctuation|mistake/.test(intent)) {
-    findings = select(['grammar', 'spelling']);
-    lead = findings.length
-      ? `I found ${findings.length} grammar or spacing item${findings.length === 1 ? '' : 's'}.`
-      : 'The current English rule pack found no matching grammar patterns.';
-  } else if (/preflight|check|review|everything/.test(intent)) {
-    findings = report.findings;
-    lead = findings.length
-      ? `The local preflight found ${findings.length} item${findings.length === 1 ? '' : 's'}: ${report.counts.block} blocking and ${report.counts.review} for review.`
-      : 'The local preflight found no configured signals.';
-  } else {
-    return {
-      supported: false,
-      findingIds: [],
-      answer:
-        'This local assistant currently answers questions about privacy, clarity, grammar, language, and the preflight report. It will not invent an answer outside those capabilities.',
+type GenerationWorkerMessage =
+  | { type: 'ready' | 'disposed'; requestId: number }
+  | { type: 'result'; requestId: number; result: AssistantReply }
+  | {
+      type: 'progress';
+      requestId: number;
+      status?: string;
+      file?: string;
+      progress?: number;
+    }
+  | { type: 'error'; requestId: number; message: string };
+
+class GenerationClient {
+  private readonly worker = new GenerationWorker({
+    name: 'invariant-smollm2-360m',
+  });
+  private requestId = 0;
+  private pending = new Map<
+    number,
+    {
+      resolve(value?: AssistantReply): void;
+      reject(error: Error): void;
+      progress?(value: number | undefined, status: string): void;
+    }
+  >();
+
+  constructor() {
+    this.worker.onmessage = ({ data }: MessageEvent<GenerationWorkerMessage>) => {
+      const pending = this.pending.get(data.requestId);
+      if (!pending) return;
+      if (data.type === 'progress') {
+        pending.progress?.(
+          data.progress,
+          data.status === 'progress' && data.file
+            ? `Loading ${data.file.split('/').at(-1)}`
+            : (data.status ?? 'Loading model'),
+        );
+        return;
+      }
+      this.pending.delete(data.requestId);
+      if (data.type === 'error') pending.reject(new Error(data.message));
+      else if (data.type === 'result') pending.resolve(data.result);
+      else pending.resolve();
+    };
+    this.worker.onerror = () => {
+      for (const pending of this.pending.values())
+        pending.reject(new Error('The local generation worker stopped unexpectedly.'));
+      this.pending.clear();
     };
   }
-  const evidence = findings
-    .slice(0, 3)
-    .map((item) => item.title)
-    .join('; ');
-  return {
-    supported: true,
-    findingIds: findings.map((item) => item.id),
-    answer: evidence ? `${lead} ${evidence}.` : lead,
-  };
+
+  private request(
+    type: 'load' | 'generate' | 'dispose',
+    request?: AssistantRequest,
+    signal?: AbortSignal,
+    progress?: (value: number | undefined, status: string) => void,
+  ) {
+    const requestId = ++this.requestId;
+    return new Promise<AssistantReply | undefined>((resolve, reject) => {
+      const abort = () => {
+        this.pending.delete(requestId);
+        reject(new DOMException('Cancelled', 'AbortError'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      this.pending.set(requestId, {
+        resolve: (value) => {
+          signal?.removeEventListener('abort', abort);
+          resolve(value);
+        },
+        reject: (error) => {
+          signal?.removeEventListener('abort', abort);
+          reject(error);
+        },
+        progress,
+      });
+      this.worker.postMessage({ type, requestId, request });
+    });
+  }
+
+  async load(
+    signal: AbortSignal,
+    progress: (value: number | undefined, status: string) => void,
+  ) {
+    await this.request('load', undefined, signal, progress);
+  }
+
+  async generate(request: AssistantRequest, signal: AbortSignal) {
+    const result = await this.request('generate', request, signal);
+    if (!result) throw new Error('The local model returned no result.');
+    return result;
+  }
+
+  destroy() {
+    this.worker.terminate();
+    this.pending.clear();
+  }
 }
 
 export function createWriterRuntime(
   profileId: LanguageProfileId,
+  assistantEngine: AssistantEngineId = 'structured',
   onEvent?: (event: LeanletKernelEvent) => void,
 ) {
   const profile =
@@ -285,10 +339,18 @@ export function createWriterRuntime(
   const kernel = createLeanletKernel({
     budget: {
       maxConcurrentRuns: 4,
-      maxResidentBytes: 96 * 1024 * 1024,
+      maxResidentBytes:
+        assistantEngine === 'smollm2-360m'
+          ? 896 * 1024 * 1024
+          : 96 * 1024 * 1024,
       defaultDeadlineMs: 2_500,
     },
-    policy: { network: 'static-assets', allowedProviders: ['javascript'] },
+    policy: {
+      network: 'static-assets',
+      allowedProviders: ['javascript', 'webgpu'],
+    },
+    selectProvider: (manifest, allowed) =>
+      manifest.providers.find((provider) => allowed.includes(provider)),
   });
   if (onEvent) kernel.subscribe(onEvent);
 
@@ -381,7 +443,7 @@ export function createWriterRuntime(
     }),
   );
   kernel.register(
-    definition<{ question: string; report: WriterReport }, AssistantReply>({
+    definition<AssistantRequest, AssistantReply>({
       manifest: {
         id: 'writer.assistant',
         version: '0.1.0',
@@ -390,10 +452,50 @@ export function createWriterRuntime(
         network: 'deny',
         estimatedResidentBytes: 24 * 1024,
       },
-      run: ({ question, report }) =>
-        accepted(assistantResponse(question, report)),
+      run: (request) => accepted(answerFromDocument(request)),
     }),
   );
+  if (assistantEngine === 'smollm2-360m') {
+    kernel.register(
+      definition<AssistantRequest, AssistantReply, GenerationClient>({
+        manifest: {
+          id: 'writer.generate-smollm2-360m',
+          version: '0.1.0',
+          task: 'bounded-document-assistance',
+          description:
+            'Optional English-first document questions and rewrites in a WebGPU worker.',
+          providers: ['webgpu'],
+          network: 'static-assets',
+          estimatedResidentBytes: 720 * 1024 * 1024,
+          assets: [
+            {
+              path: 'https://huggingface.co/onnx-community/SmolLM2-360M-Instruct-ONNX/resolve/fe7c7db/onnx/model_q4f16.onnx',
+              bytes: 272_353_302,
+              sha256:
+                'ed196149bd9f24de0aa78f2ce8c6fa1167f71de9857173d1a231a4cbc01fb1c0',
+              license: 'Apache-2.0',
+              sourceRevision: 'fe7c7db',
+            },
+          ],
+        },
+        load: async (context) => {
+          const client = new GenerationClient();
+          try {
+            await client.load(context.signal, (progress, status) =>
+              context.emit({ phase: 'model-load', progress, status }),
+            );
+            return client;
+          } catch (error) {
+            client.destroy();
+            throw error;
+          }
+        },
+        run: async (request, client, context) =>
+          accepted(await client.generate(request, context.signal)),
+        dispose: (client) => client.destroy(),
+      }),
+    );
+  }
 
   const flow = defineFlow<string, WriterReport>({
     id: 'writer.preflight',
@@ -521,13 +623,42 @@ export function createWriterRuntime(
         })),
       };
     },
-    async ask(question: string, report: WriterReport) {
-      const result = await kernel.run<
-        { question: string; report: WriterReport },
-        AssistantReply
-      >('writer.assistant', { question, report }, { deadlineMs: 500 });
+    assistantEngine:
+      ASSISTANT_ENGINES.find((item) => item.id === assistantEngine) ??
+      ASSISTANT_ENGINES[0],
+    async ask(request: AssistantRequest, signal?: AbortSignal) {
+      const rewrite = isRewriteRequest(request.question);
+      const targetLength = request.selection?.text.length ?? request.text.length;
+      const inputLimit = request.selection ? 5_000 : 7_500;
+      if (assistantEngine === 'smollm2-360m' && rewrite && targetLength > inputLimit)
+        return {
+          basisHash: stableTextHash(request.text),
+          answer: `This rewrite target is ${targetLength.toLocaleString()} characters. The local model accepts at most ${inputLimit.toLocaleString()} characters for a reviewable rewrite; select a smaller passage.`,
+          findingIds: [],
+          supported: false,
+          source: 'generative' as const,
+          kind: 'rewrite' as const,
+          caveat: 'No model was loaded and no text was changed.',
+        };
+      const leanletId =
+        assistantEngine === 'smollm2-360m'
+          ? 'writer.generate-smollm2-360m'
+          : 'writer.assistant';
+      const result = await kernel.run<AssistantRequest, AssistantReply>(
+        leanletId,
+        request,
+        {
+          signal,
+          deadlineMs: assistantEngine === 'smollm2-360m' ? 900_000 : 750,
+          priority: 3,
+        },
+      );
       if (result.status !== 'accepted')
-        throw new Error('The local assistant could not complete this request.');
+        throw new Error(
+          result.status === 'failed'
+            ? result.error.message
+            : `The local assistant abstained: ${result.reason}.`,
+        );
       return result.output;
     },
     async lookupWord(word: string, signal?: AbortSignal) {

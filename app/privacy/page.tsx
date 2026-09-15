@@ -39,13 +39,22 @@ export default function PrivacyPage() {
           There is no remote text-generation or inference endpoint in the
           application.
         </p>
+        <p>
+          If you explicitly select Local generative, the browser downloads a
+          pinned compact model from Hugging Face. The model host receives an
+          ordinary asset request, not your draft. Generation runs in a dedicated
+          WebGPU worker after the download completes.
+        </p>
         <h2>Limits</h2>
         <p>
           Language identification is statistical and can be uncertain on short
           or mixed-language text. The current spelling and word-reference packs
           are English. Privacy patterns catch several common identifiers but are
           not a complete data-loss-prevention system. Invariant displays these
-          limits and abstains where coverage is unavailable.
+          limits and abstains where coverage is unavailable. The optional
+          generative model is English-first and can produce inaccurate or
+          meaning-changing text; generated rewrites are never applied without
+          your action.
         </p>
         <h2>Third-party data</h2>
         <p>

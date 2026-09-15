@@ -28,8 +28,11 @@ import {
   X,
 } from 'lucide-react';
 import { createWriterRuntime, type WriterRuntime } from '@/lib/writer-runtime';
+import { stableTextHash } from '@/lib/analyzers';
 import {
+  ASSISTANT_ENGINES,
   LANGUAGE_PROFILES,
+  type AssistantEngineId,
   type AssistantReply,
   type LanguageProfileId,
   type LexiconResult,
@@ -47,11 +50,13 @@ type DocumentRecord = {
   updatedAt: number;
 };
 type ReviewTab = 'suggestions' | 'words' | 'assistant';
+type MobileDrawer = 'library' | 'review' | null;
 type Status = 'ready' | 'analyzing' | 'error';
 type AssistantMessage = {
   role: 'user' | 'assistant';
   text: string;
   supported?: boolean;
+  reply?: AssistantReply;
 };
 const makeDocument = (body = '', title = 'Untitled draft'): DocumentRecord => ({
   id: crypto.randomUUID(),
@@ -87,11 +92,14 @@ export default function WriterApp() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [activeId, setActiveId] = useState('');
   const [profileId, setProfileId] = useState<LanguageProfileId>('eld-small');
+  const [assistantEngine, setAssistantEngine] =
+    useState<AssistantEngineId>('structured');
   const [runtime, setRuntime] = useState<WriterRuntime>();
   const [report, setReport] = useState<WriterReport>();
   const [status, setStatus] = useState<Status>('ready');
   const [error, setError] = useState('');
   const [tab, setTab] = useState<ReviewTab>('suggestions');
+  const [mobileDrawer, setMobileDrawer] = useState<MobileDrawer>(null);
   const [settings, setSettings] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [autoCorrect, setAutoCorrect] = useState(false);
@@ -102,19 +110,24 @@ export default function WriterApp() {
   const [messages, setMessages] = useState<AssistantMessage[]>([
     {
       role: 'assistant',
-      text: 'I can explain this draft’s local review: privacy, clarity, spelling, language, and exact findings.',
+      text: 'I can summarize this draft, retrieve its key passages, build an outline, explain review evidence, and prepare supported edits.',
     },
   ]);
   const [assistantInput, setAssistantInput] = useState('');
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantStatus, setAssistantStatus] = useState('Ready');
+  const [assistantProgress, setAssistantProgress] = useState<number>();
+  const [selection, setSelection] = useState({ start: 0, end: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const inspectorRef = useRef<HTMLElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | undefined>(undefined);
+  const assistantController = useRef<AbortController | undefined>(undefined);
   const active = documents.find((item) => item.id === activeId) ?? documents[0];
   const draft = active?.body ?? '';
 
   useEffect(() => {
-    if ('serviceWorker' in navigator) void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
+    if (import.meta.env.PROD && 'serviceWorker' in navigator)
+      void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
     const stored = localStorage.getItem('invariant:documents');
     let restored: DocumentRecord[] = [];
     try {
@@ -130,19 +143,51 @@ export default function WriterApp() {
     ) as LanguageProfileId | null;
     if (LANGUAGE_PROFILES.some((item) => item.id === storedProfile))
       setProfileId(storedProfile!);
+    const storedAssistant = localStorage.getItem(
+      'invariant:assistant-engine',
+    ) as AssistantEngineId | null;
+    if (
+      ASSISTANT_ENGINES.some((item) => item.id === storedAssistant) &&
+      (storedAssistant === 'structured' || 'gpu' in navigator)
+    )
+      setAssistantEngine(storedAssistant!);
     setAutoCorrect(localStorage.getItem('invariant:auto-correct') === 'true');
   }, []);
   useEffect(() => {
-    const next = createWriterRuntime(profileId);
+    const next = createWriterRuntime(profileId, assistantEngine, (event) => {
+      if (event.leanletId !== 'writer.generate-smollm2-360m') return;
+      if (event.type === 'diagnostic') {
+        const value = event.detail.progress;
+        setAssistantProgress(typeof value === 'number' ? value : undefined);
+        setAssistantStatus(
+          typeof event.detail.status === 'string'
+            ? event.detail.status
+            : 'Loading local model',
+        );
+      } else if (event.type === 'loaded') {
+        setAssistantProgress(100);
+        setAssistantStatus('Local model ready');
+      } else if (event.type === 'failed') {
+        setAssistantStatus('Local model unavailable');
+      }
+    });
     setRuntime(next);
     setReport(undefined);
     setError('');
     localStorage.setItem('invariant:language-profile', profileId);
+    localStorage.setItem('invariant:assistant-engine', assistantEngine);
+    setAssistantStatus(
+      assistantEngine === 'structured'
+        ? 'Document tools ready'
+        : 'Loads on first request',
+    );
+    setAssistantProgress(undefined);
     return () => {
       controller.current?.abort();
+      assistantController.current?.abort();
       void next.destroy();
     };
-  }, [profileId]);
+  }, [profileId, assistantEngine]);
   useEffect(() => {
     if (!documents.length) return;
     setSaved(false);
@@ -171,10 +216,11 @@ export default function WriterApp() {
     setDocuments((items) => [item, ...items]);
     setActiveId(item.id);
     setReport(undefined);
+    setMobileDrawer(null);
   };
   const reviewAndReveal = async () => {
+    setMobileDrawer('review');
     await runAnalysis();
-    if (window.innerWidth <= 650) inspectorRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
   const runAnalysis = useCallback(async () => {
     if (!runtime || !draft.trim()) {
@@ -254,16 +300,85 @@ export default function WriterApp() {
         draft.slice(finding.range.end),
     });
   };
-  const ask = async () => {
-    const question = assistantInput.trim();
-    if (!question || !runtime || !report) return;
+  const ask = async (prompt?: string) => {
+    const question = (prompt ?? assistantInput).trim();
+    if (!question || !runtime || !draft.trim() || assistantBusy) return;
     setMessages((items) => [...items, { role: 'user', text: question }]);
     setAssistantInput('');
-    const reply: AssistantReply = await runtime.ask(question, report);
-    setMessages((items) => [
-      ...items,
-      { role: 'assistant', text: reply.answer, supported: reply.supported },
-    ]);
+    setAssistantBusy(true);
+    setAssistantStatus(
+      assistantEngine === 'structured' ? 'Reading this draft' : 'Preparing local model',
+    );
+    assistantController.current?.abort();
+    assistantController.current = new AbortController();
+    try {
+      const currentReport = await runtime.analyze(
+        draft,
+        assistantController.current.signal,
+      );
+      setReport(currentReport);
+      const selectedText =
+        selection.end > selection.start
+          ? draft.slice(selection.start, selection.end)
+          : undefined;
+      const reply = await runtime.ask(
+        {
+          question,
+          text: draft,
+          report: currentReport,
+          selection: selectedText
+            ? { ...selection, text: selectedText }
+            : undefined,
+          history: messages
+            .slice(-6)
+            .map((message) => ({ role: message.role, content: message.text })),
+        },
+        assistantController.current.signal,
+      );
+      setMessages((items) => [
+        ...items,
+        {
+          role: 'assistant',
+          text: reply.answer,
+          supported: reply.supported,
+          reply,
+        },
+      ]);
+      setAssistantStatus(
+        assistantEngine === 'structured'
+          ? 'Document tools ready'
+          : 'Local model ready',
+      );
+    } catch (caught) {
+      if (!assistantController.current.signal.aborted) {
+        const text =
+          caught instanceof Error
+            ? caught.message
+            : 'The local assistant could not finish this request.';
+        setMessages((items) => [
+          ...items,
+          { role: 'assistant', text, supported: false },
+        ]);
+        setAssistantStatus('Assistant unavailable');
+      }
+    } finally {
+      setAssistantBusy(false);
+    }
+  };
+  const applyAssistantReply = (reply: AssistantReply) => {
+    if (
+      !reply.replacement ||
+      !reply.range ||
+      reply.basisHash !== stableTextHash(draft)
+    )
+      return;
+    updateActive({
+      body:
+        draft.slice(0, reply.range.start) +
+        reply.replacement +
+        draft.slice(reply.range.end),
+    });
+    setSelection({ start: 0, end: 0 });
   };
   const exportDraft = () => {
     const blob = new Blob([draft], { type: 'text/markdown;charset=utf-8' });
@@ -303,6 +418,12 @@ export default function WriterApp() {
           <i />
         </div>
         <div className="desk-actions">
+          <button className="mobile-only" title="Documents" onClick={() => setMobileDrawer('library')}>
+            <BookOpen />
+          </button>
+          <button className="mobile-only" title="Review and assistant" onClick={() => setMobileDrawer('review')}>
+            <Gauge />
+          </button>
           <button
             title="Focus mode"
             onClick={() => setFocusMode((value) => !value)}
@@ -317,8 +438,19 @@ export default function WriterApp() {
           </a>
         </div>
       </header>
+      {mobileDrawer ? (
+        <button
+          className="mobile-drawer-backdrop"
+          aria-label="Close drawer"
+          onClick={() => setMobileDrawer(null)}
+        />
+      ) : null}
       <div className="desk-grid">
-        <aside className="library">
+        <aside className={`library ${mobileDrawer === 'library' ? 'drawer-open' : ''}`}>
+          <div className="mobile-drawer-head">
+            <strong>Documents</strong>
+            <button aria-label="Close documents" onClick={() => setMobileDrawer(null)}><X /></button>
+          </div>
           <button className="new-document" onClick={createDraft}>
             <FilePlus2 /> New document
           </button>
@@ -333,6 +465,7 @@ export default function WriterApp() {
                   onClick={() => {
                     setActiveId(item.id);
                     setReport(undefined);
+                    setMobileDrawer(null);
                   }}
                 >
                   <FileText />
@@ -409,6 +542,12 @@ export default function WriterApp() {
               value={draft}
               onChange={(event) => updateActive({ body: event.target.value })}
               onDoubleClick={selectWord}
+              onSelect={(event) =>
+                setSelection({
+                  start: event.currentTarget.selectionStart,
+                  end: event.currentTarget.selectionEnd,
+                })
+              }
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                   event.preventDefault();
@@ -436,7 +575,11 @@ export default function WriterApp() {
             </footer>
           </div>
         </section>
-      <aside className="inspector" ref={inspectorRef}>
+      <aside className={`inspector ${mobileDrawer === 'review' ? 'drawer-open' : ''}`}>
+          <div className="mobile-drawer-head">
+            <strong>Review</strong>
+            <button aria-label="Close review" onClick={() => setMobileDrawer(null)}><X /></button>
+          </div>
           <div className="inspector-head">
             <div>
               <p className="desk-label">DRAFT REVIEW</p>
@@ -466,7 +609,7 @@ export default function WriterApp() {
               className={tab === 'assistant' ? 'active' : ''}
               onClick={() => setTab('assistant')}
             >
-              Ask
+              Assistant
             </button>
           </div>
           {tab === 'suggestions' && (
@@ -698,8 +841,31 @@ export default function WriterApp() {
           {tab === 'assistant' && (
             <div className="inspector-body assistant">
               <div className="assistant-boundary">
-                <LockKeyhole /> Answers are composed only from the current local
-                review.
+                <LockKeyhole />
+                <span>
+                  <strong>{assistantStatus}</strong>
+                  {assistantEngine === 'structured'
+                    ? 'Answers use this draft and its local review.'
+                    : 'The model runs here. Draft text is not uploaded.'}
+                </span>
+              </div>
+              {assistantProgress !== undefined && assistantBusy ? (
+                <div className="assistant-progress" aria-label="Model loading progress">
+                  <i style={{ width: `${Math.max(2, assistantProgress)}%` }} />
+                </div>
+              ) : null}
+              <div className="assistant-actions" aria-label="Writing assistant actions">
+                <button onClick={() => void ask('Summarize this draft')}>Summarize</button>
+                <button onClick={() => void ask('Suggest the most useful edits')}>Suggest edits</button>
+                <button onClick={() => void ask('Rate this draft using the available evidence')}>Rate draft</button>
+                <button onClick={() => void ask('How might this draft feel to a reader? Explain uncertainty')}>Reader impression</button>
+                <button onClick={() => void ask('Build a short outline from this draft')}>Outline</button>
+                <button
+                  disabled={selection.start === selection.end}
+                  onClick={() => void ask('Rewrite the selected text more clearly while preserving its meaning and voice')}
+                >
+                  Rewrite selection
+                </button>
               </div>
               <div className="messages">
                 {messages.map((message, index) => (
@@ -708,6 +874,24 @@ export default function WriterApp() {
                       {message.role === 'user' ? 'You' : 'Invariant'}
                     </strong>
                     <p>{message.text}</p>
+                    {message.reply?.caveat ? (
+                      <small>{message.reply.caveat}</small>
+                    ) : null}
+                    {message.reply?.replacement && message.reply.range ? (
+                      <div className="assistant-rewrite">
+                        <blockquote>{message.reply.replacement}</blockquote>
+                        <button
+                          disabled={
+                            message.reply.basisHash !== stableTextHash(draft)
+                          }
+                          onClick={() => applyAssistantReply(message.reply!)}
+                        >
+                          {message.reply.basisHash !== stableTextHash(draft)
+                            ? 'Draft changed · ask again'
+                            : `Replace ${message.reply.range.start === 0 && message.reply.range.end === draft.length ? 'draft' : 'selection'}`}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -721,12 +905,15 @@ export default function WriterApp() {
                   value={assistantInput}
                   onChange={(event) => setAssistantInput(event.target.value)}
                   placeholder={
-                    report ? 'Ask about this review…' : 'Run a review first'
+                    assistantEngine === 'structured'
+                      ? 'Ask about this draft…'
+                      : 'Ask or request a rewrite…'
                   }
-                  disabled={!report}
+                  aria-label="Ask Invariant about this draft"
+                  disabled={!draft.trim() || assistantBusy}
                 />
-                <button disabled={!report || !assistantInput.trim()}>
-                  Ask
+                <button disabled={!draft.trim() || !assistantInput.trim() || assistantBusy}>
+                  {assistantBusy ? <LoaderCircle className="spin" /> : 'Ask'}
                 </button>
               </form>
             </div>
@@ -778,6 +965,37 @@ export default function WriterApp() {
             </label>
             <label>
               <span>
+                <strong>Writing assistant</strong>
+                <small>
+                  Document tools are instant. Local generative downloads an
+                  English-first 360M model on its first request and requires
+                  WebGPU.
+                </small>
+              </span>
+              <select
+                aria-label="Writing assistant"
+                value={assistantEngine}
+                onChange={(event) =>
+                  setAssistantEngine(event.target.value as AssistantEngineId)
+                }
+              >
+                {ASSISTANT_ENGINES.map((engine) => (
+                  <option
+                    value={engine.id}
+                    key={engine.id}
+                    disabled={
+                      engine.id === 'smollm2-360m' &&
+                      typeof navigator !== 'undefined' &&
+                      !('gpu' in navigator)
+                    }
+                  >
+                    {engine.name} · {engine.transfer}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>
                 <strong>Automatic exact corrections</strong>
                 <small>
                   Applies only deterministic grammar and spacing fixes. Spelling
@@ -813,7 +1031,9 @@ export default function WriterApp() {
                 identification is multilingual. The shipped spelling dictionary
                 and WordNet reference are English; for other detected languages,
                 Invariant abstains from those checks rather than applying
-                English rules.
+                English rules. The optional SmolLM2 assistant is also
+                English-first, requires WebGPU, downloads model assets from the
+                model host on first use, and may produce incorrect text.
               </p>
             </div>
           </dialog>

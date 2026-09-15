@@ -72,10 +72,50 @@ export type LexiconResult = {
 };
 
 export type AssistantReply = {
+  basisHash: string;
   answer: string;
   findingIds: string[];
   supported: boolean;
+  source: 'structured' | 'generative';
+  kind: 'answer' | 'suggestion' | 'rewrite';
+  replacement?: string;
+  range?: { start: number; end: number };
+  caveat?: string;
 };
+
+export type AssistantRequest = {
+  question: string;
+  text: string;
+  report: WriterReport;
+  selection?: { start: number; end: number; text: string };
+  /** Recent bounded turns for the optional conversational model. */
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+};
+
+export type AssistantEngineId = 'structured' | 'smollm2-360m';
+
+export const ASSISTANT_ENGINES: ReadonlyArray<{
+  id: AssistantEngineId;
+  name: string;
+  detail: string;
+  transfer: string;
+  coverage: string;
+}> = [
+  {
+    id: 'structured',
+    name: 'Document tools',
+    detail: 'Immediate evidence, retrieval, and exact edits',
+    transfer: 'Included',
+    coverage: 'Language-neutral metrics; strongest with English review evidence',
+  },
+  {
+    id: 'smollm2-360m',
+    name: 'Local generative · Preview',
+    detail: 'SmolLM2 360M Instruct for bounded rewrites and document questions',
+    transfer: '~272 MB + runtime once',
+    coverage: 'English-first; generated output requires review',
+  },
+] as const;
 
 export const LANGUAGE_PROFILES: ReadonlyArray<{
   id: LanguageProfileId;
