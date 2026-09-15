@@ -5,3 +5,16 @@ export function InvariantMark({ className = '' }: { className?: string }) {
 export function Brand({ inverse = false }: { inverse?: boolean }) {
   return <span className={`invariant-brand ${inverse ? 'inverse' : ''}`}><InvariantMark/><span>INVARIANT</span></span>;
 }
+
+export function LeanletBrand() {
+  return (
+    <span className="leanlet-brand">
+      <span className="leanlet-mark" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span>Leanlet</span>
+    </span>
+  );
+}

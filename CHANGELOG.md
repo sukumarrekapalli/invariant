@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Added a visible, linked “Built with Leanlet” framework signature to the
+  landing page.
+- Re-triggered the compiled GitHub Pages artifact deployment after repository
+  Pages initialization, replacing the raw development entry point.
+
 ## 0.2.0
 
 - Reworked the brand system around paper, ink, and semantic-only signal color.

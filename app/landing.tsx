@@ -9,7 +9,7 @@ import {
   Shield,
   WifiOff,
 } from 'lucide-react';
-import { Brand } from './brand';
+import { Brand, LeanletBrand } from './brand';
 
 const checks = [
   'Spelling and exact corrections',
@@ -223,17 +223,29 @@ export default function Landing() {
           Open the writing desk <ArrowRight />
         </a>
       </section>
+      <a
+        className="powered-by"
+        href="https://sukumarrekapalli.github.io/leanlet/"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Invariant is powered by the Leanlet browser intelligence framework"
+      >
+        <span>
+          <small>BUILT WITH</small>
+          <LeanletBrand />
+        </span>
+        <p>
+          Scoped browser intelligence, worker isolation, lifecycle policy, and
+          local model orchestration.
+        </p>
+        <span className="powered-link">
+          Explore the framework <ArrowRight />
+        </span>
+      </a>
       <footer className="land-footer">
         <span>Invariant · Open-source writing software</span>
         <div>
           <a href={`${base}/privacy/`}>Privacy</a>
-          <a
-            href="https://sukumarrekapalli.github.io/leanlet/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Powered by Leanlet
-          </a>
           <a
             href="https://github.com/sukumarrekapalli"
             target="_blank"
