@@ -41,13 +41,17 @@ can build extractive summaries and outlines, retrieve relevant passages, report
 metrics, explain typed findings, and prepare only replacements supported by an
 exact finding. It runs without loading a language generator.
 
-`writer.generate-smollm2-360m` is registered only when the user selects Local
-generative. Its worker loads SmolLM2 360M Instruct with Transformers.js on
-WebGPU, reports asset progress through kernel diagnostics, and receives only
-the current document, optional selection, and bounded instruction. It is
-English-first and its output is never auto-applied. The kernel declares a
-720 MiB resident estimate and a larger budget for this profile; that declaration
-is admission metadata rather than measured GPU memory.
+`writer.generate-smollm2-135m` and `writer.generate-smollm2-360m` are registered
+only when their respective profiles are selected. The compatibility profile
+uses q4 weights; the quality profile uses q4f16 and requires `shader-f16`.
+Their workers request a real GPU adapter, report asset progress and failures
+through kernel diagnostics, and receive only the current document, optional
+selection, and bounded instruction. If initialization fails, the request is
+routed to `writer.assistant` and the response identifies that fallback.
+Greetings, summaries, outlines, metrics, ratings, privacy questions, language
+questions, and evidence-backed edit requests route directly to
+`writer.assistant`; selecting a local model does not make those bounded intents
+pay model startup or generation cost.
 
 Product checks are application contracts rather than hidden prompts. The next
 Leanlet package line exposes `defineCheck()` and `runCheck()` so a check maps

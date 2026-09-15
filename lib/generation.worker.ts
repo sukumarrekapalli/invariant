@@ -5,12 +5,16 @@ import {
   buildGenerativeMessages,
   isRewriteRequest,
 } from './document-assistant.ts';
+import {
+  describeGenerationError,
+  LOCAL_GENERATION_PROFILES,
+  type LocalGenerationProfileId,
+} from './generation-support.ts';
 import { stableTextHash } from './analyzers.ts';
 import type { AssistantReply, AssistantRequest } from './writer-types.ts';
 
 declare const self: DedicatedWorkerGlobalScope;
 
-const MODEL_ID = 'onnx-community/SmolLM2-360M-Instruct-ONNX';
 type Generator = {
   (
     input: ReadonlyArray<{ role: string; content: string }>,
@@ -20,20 +24,48 @@ type Generator = {
 };
 
 let generator: Generator | undefined;
+let activeProfileId: LocalGenerationProfileId | undefined;
 
 function send(value: unknown) {
   self.postMessage(value);
 }
 
-async function load(requestId: number) {
-  if (generator) return generator;
+async function load(requestId: number, profileId: LocalGenerationProfileId) {
+  if (generator && activeProfileId === profileId) return generator;
+  if (generator) await generator.dispose?.();
+  generator = undefined;
+  activeProfileId = undefined;
+  const profile = LOCAL_GENERATION_PROFILES[profileId];
+  const gpu = (
+    self.navigator as unknown as {
+      gpu?: {
+        requestAdapter(): Promise<{
+          features: { has(name: string): boolean };
+        } | null>;
+      };
+    }
+  ).gpu;
+  if (!gpu)
+    throw new Error(
+      'WebGPU is not available in this browser. Use Document tools or a WebGPU-capable browser.',
+    );
+  const adapter = await gpu.requestAdapter();
+  if (!adapter)
+    throw new Error(
+      'The browser could not acquire a WebGPU adapter. Use Document tools or try a browser with hardware acceleration enabled.',
+    );
+  if (profile.requiresShaderF16 && !adapter.features.has('shader-f16'))
+    throw new Error(
+      'This GPU does not expose shader-f16, which the 360M profile requires. Select Local compact instead.',
+    );
   // This profile is remote-first. Enabling local lookup against a SPA host can
   // return index.html for missing model metadata and fail JSON parsing.
   env.allowLocalModels = false;
   env.allowRemoteModels = true;
-  generator = (await pipeline('text-generation', MODEL_ID, {
+  generator = (await pipeline('text-generation', profile.modelId, {
     device: 'webgpu',
-    dtype: 'q4f16',
+    dtype: profile.dtype,
+    revision: profile.revision,
     progress_callback: (progress: Record<string, unknown>) => {
       send({
         type: 'progress',
@@ -45,6 +77,7 @@ async function load(requestId: number) {
       });
     },
   })) as unknown as Generator;
+  activeProfileId = profileId;
   return generator;
 }
 
@@ -57,8 +90,17 @@ function generatedText(output: Awaited<ReturnType<Generator>>) {
 
 self.onmessage = async (
   event: MessageEvent<
-    | { type: 'load'; requestId: number }
-    | { type: 'generate'; requestId: number; request: AssistantRequest }
+    | {
+        type: 'load';
+        requestId: number;
+        profileId: LocalGenerationProfileId;
+      }
+    | {
+        type: 'generate';
+        requestId: number;
+        profileId: LocalGenerationProfileId;
+        request: AssistantRequest;
+      }
     | { type: 'dispose'; requestId: number }
   >,
 ) => {
@@ -67,10 +109,11 @@ self.onmessage = async (
     if (message.type === 'dispose') {
       await generator?.dispose?.();
       generator = undefined;
+      activeProfileId = undefined;
       send({ type: 'disposed', requestId: message.requestId });
       return;
     }
-    const model = await load(message.requestId);
+    const model = await load(message.requestId, message.profileId);
     if (message.type === 'load') {
       send({ type: 'ready', requestId: message.requestId });
       return;
@@ -102,17 +145,14 @@ self.onmessage = async (
             : { start: 0, end: message.request.text.length }
           : undefined,
       caveat:
-        'SmolLM2 360M is an English-first compact model. Generated text may be inaccurate or alter meaning; verify every change.',
+        `${LOCAL_GENERATION_PROFILES[message.profileId].label} is an English-first compact model. Generated text may be inaccurate or alter meaning; verify every change.`,
     };
     send({ type: 'result', requestId: message.requestId, result: reply });
   } catch (error) {
     send({
       type: 'error',
       requestId: message.requestId,
-      message:
-        error instanceof Error
-          ? error.message
-          : 'The local generative model could not run.',
+      message: describeGenerationError(error),
     });
   }
 };

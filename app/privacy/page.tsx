@@ -40,10 +40,11 @@ export default function PrivacyPage() {
           application.
         </p>
         <p>
-          If you explicitly select Local generative, the browser downloads a
-          pinned compact model from Hugging Face. The model host receives an
+          If you explicitly select a local model profile, the browser downloads
+          a pinned compact model from Hugging Face. The model host receives an
           ordinary asset request, not your draft. Generation runs in a dedicated
-          WebGPU worker after the download completes.
+          WebGPU worker; if it cannot start, Invariant falls back to bounded
+          Document tools.
         </p>
         <h2>Limits</h2>
         <p>

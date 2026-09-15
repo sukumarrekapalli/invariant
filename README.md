@@ -14,8 +14,8 @@ Invariant is an open-source writing environment whose core intelligence runs in 
 - on-demand definitions, synonyms, and antonyms from Princeton WordNet;
 - a document-aware structured assistant for summaries, outlines, retrieval,
   metrics, evidence-backed suggestions, and exact supported rewrites;
-- an optional Preview WebGPU SmolLM2 360M Instruct pack for broader English-first
-  questions and rewrites, downloaded only after the user selects it;
+- optional WebGPU SmolLM2 profiles: a 135M/q4 compatibility profile and a
+  higher-capacity 360M/q4f16 Preview profile for supported GPUs;
 - explicit abstention and quality warnings when a capability lacks coverage.
 
 Invariant does not claim that a clean report is error-free, that its score measures literary quality, or that the current English packs provide multilingual grammar support.
@@ -54,7 +54,8 @@ Invariant editor
 On demand
   ├─ writer.lexicon-en         lazy two-letter WordNet shard
   ├─ writer.assistant          structured document tools and evidence
-  └─ writer.generate-smollm2   optional WebGPU generative worker
+  ├─ writer.generate-smollm2-135m   compatible q4 WebGPU worker
+  └─ writer.generate-smollm2-360m   optional q4f16 WebGPU worker
 ```
 
 Leanlet owns orchestration, lifecycle, budgets, scheduling, coalescing, network
@@ -63,10 +64,12 @@ and product behavior. The optional model remains lazy and is disposed through
 the same kernel contract as the smaller workers.
 
 The structured assistant is the default because it is immediate, inspectable,
-and broadly compatible. Local generative Preview mode is opt-in: it requires WebGPU,
-downloads roughly 272 MB of quantized model weights plus tokenizer/runtime
-files, and may return inaccurate or meaning-changing text. Draft text is sent
-to neither an inference endpoint nor the model host.
+and broadly compatible. Local generation is opt-in: it requires a usable WebGPU
+adapter and downloads roughly 181 MB or 272 MB of quantized weights plus
+tokenizer/runtime files. Both profiles are English-first and may be inaccurate.
+Invariant preflights compatibility, reports initialization failures, and falls
+back to bounded Document tools. Draft text is sent to neither an inference
+endpoint nor the model host.
 
 ## Documentation
 

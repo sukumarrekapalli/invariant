@@ -59,6 +59,23 @@ export function isRewriteRequest(question: string) {
   );
 }
 
+export function isStructuredAssistantRequest(question: string) {
+  const intent = question.toLocaleLowerCase().trim();
+  return (
+    /^(hi|hello|hey|good (morning|afternoon|evening))\b/.test(intent) ||
+    /\b(what can you do|help me|who are you|what do you know)\b/.test(intent) ||
+    /\b(summary|summarize|main point|key points?|outline|structure)\b/.test(intent) ||
+    /\b(word count|how many words|reading time|length)\b/.test(intent) ||
+    /\b(rate|score|grade|how good|quality)\b/.test(intent) ||
+    /\b(private|privacy|secret|sensitive|safe|share|send)\b/.test(intent) ||
+    /\b(language|locale)\b/.test(intent) ||
+    (/\b(suggest|improve|edit|problem|issue|grammar|spelling|clarity|fix)\b/.test(
+      intent,
+    ) &&
+      !isRewriteRequest(intent))
+  );
+}
+
 function exactRewrite(text: string, findings: WriterFinding[]) {
   return findings
     .filter((item) => item.range && item.suggestion?.safeToApply)

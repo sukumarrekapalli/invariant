@@ -4,6 +4,7 @@ import {
   answerFromDocument,
   buildGenerativeMessages,
   isRewriteRequest,
+  isStructuredAssistantRequest,
   summarizeDocument,
 } from '../lib/document-assistant.ts';
 
@@ -104,4 +105,12 @@ test('tone questions remain conversational while explicit tone changes rewrite',
   assert.equal(isRewriteRequest('How might this feel to a reader?'), false);
   assert.equal(isRewriteRequest('Change this paragraph to a formal tone'), true);
   assert.equal(isRewriteRequest('Rewrite the selected sentence'), true);
+});
+
+test('assistant routing keeps bounded intents off the generative model', () => {
+  assert.equal(isStructuredAssistantRequest('hi'), true);
+  assert.equal(isStructuredAssistantRequest('summarize this draft'), true);
+  assert.equal(isStructuredAssistantRequest('suggest edits'), true);
+  assert.equal(isStructuredAssistantRequest('how does this feel to a reader?'), false);
+  assert.equal(isStructuredAssistantRequest('rewrite this with a warmer tone'), false);
 });

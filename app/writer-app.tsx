@@ -52,6 +52,12 @@ type DocumentRecord = {
 type ReviewTab = 'suggestions' | 'words' | 'assistant';
 type MobileDrawer = 'library' | 'review' | null;
 type Status = 'ready' | 'analyzing' | 'error';
+type GenerationSupport = {
+  checked: boolean;
+  webgpu: boolean;
+  shaderF16: boolean;
+  reason?: string;
+};
 type AssistantMessage = {
   role: 'user' | 'assistant';
   text: string;
@@ -117,6 +123,12 @@ export default function WriterApp() {
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantStatus, setAssistantStatus] = useState('Ready');
   const [assistantProgress, setAssistantProgress] = useState<number>();
+  const [generationSupport, setGenerationSupport] =
+    useState<GenerationSupport>({
+      checked: false,
+      webgpu: false,
+      shaderF16: false,
+    });
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
@@ -154,8 +166,75 @@ export default function WriterApp() {
     setAutoCorrect(localStorage.getItem('invariant:auto-correct') === 'true');
   }, []);
   useEffect(() => {
+    let active = true;
+    const inspect = async () => {
+      const gpu = (
+        navigator as unknown as {
+          gpu?: {
+            requestAdapter(): Promise<{
+              features: { has(name: string): boolean };
+            } | null>;
+          };
+        }
+      ).gpu;
+      if (!gpu) {
+        if (active)
+          setGenerationSupport({
+            checked: true,
+            webgpu: false,
+            shaderF16: false,
+            reason: 'WebGPU is not exposed by this browser.',
+          });
+        return;
+      }
+      try {
+        const adapter = await gpu.requestAdapter();
+        if (!active) return;
+        if (!adapter) {
+          setGenerationSupport({
+            checked: true,
+            webgpu: false,
+            shaderF16: false,
+            reason:
+              'No WebGPU adapter is available. Hardware acceleration may be disabled.',
+          });
+          return;
+        }
+        setGenerationSupport({
+          checked: true,
+          webgpu: true,
+          shaderF16: adapter.features.has('shader-f16'),
+        });
+      } catch (caught) {
+        if (active)
+          setGenerationSupport({
+            checked: true,
+            webgpu: false,
+            shaderF16: false,
+            reason:
+              caught instanceof Error
+                ? caught.message
+                : 'WebGPU capability detection failed.',
+          });
+      }
+    };
+    void inspect();
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!generationSupport.checked || assistantEngine === 'structured') return;
+    if (!generationSupport.webgpu) setAssistantEngine('structured');
+    else if (
+      assistantEngine === 'smollm2-360m' &&
+      !generationSupport.shaderF16
+    )
+      setAssistantEngine('smollm2-135m');
+  }, [assistantEngine, generationSupport]);
+  useEffect(() => {
     const next = createWriterRuntime(profileId, assistantEngine, (event) => {
-      if (event.leanletId !== 'writer.generate-smollm2-360m') return;
+      if (!event.leanletId.startsWith('writer.generate-smollm2-')) return;
       if (event.type === 'diagnostic') {
         const value = event.detail.progress;
         setAssistantProgress(typeof value === 'number' ? value : undefined);
@@ -345,7 +424,9 @@ export default function WriterApp() {
         },
       ]);
       setAssistantStatus(
-        assistantEngine === 'structured'
+        reply.source === 'structured' && assistantEngine !== 'structured'
+          ? 'Answered by Document tools'
+          : assistantEngine === 'structured'
           ? 'Document tools ready'
           : 'Local model ready',
       );
@@ -967,9 +1048,8 @@ export default function WriterApp() {
               <span>
                 <strong>Writing assistant</strong>
                 <small>
-                  Document tools are instant. Local generative downloads an
-                  English-first 360M model on its first request and requires
-                  WebGPU.
+                  Document tools are instant. Local profiles download once on
+                  first use and require a working WebGPU adapter.
                 </small>
               </span>
               <select
@@ -984,9 +1064,12 @@ export default function WriterApp() {
                     value={engine.id}
                     key={engine.id}
                     disabled={
-                      engine.id === 'smollm2-360m' &&
-                      typeof navigator !== 'undefined' &&
-                      !('gpu' in navigator)
+                      generationSupport.checked &&
+                      ((engine.id === 'smollm2-135m' &&
+                        !generationSupport.webgpu) ||
+                        (engine.id === 'smollm2-360m' &&
+                          (!generationSupport.webgpu ||
+                            !generationSupport.shaderF16)))
                     }
                   >
                     {engine.name} · {engine.transfer}
@@ -994,6 +1077,25 @@ export default function WriterApp() {
                 ))}
               </select>
             </label>
+            {generationSupport.checked && !generationSupport.webgpu ? (
+              <output className="model-warning">
+                <AlertTriangle />
+                <p>
+                  <strong>Generative profiles unavailable.</strong>{' '}
+                  {generationSupport.reason} Document tools remain available.
+                </p>
+              </output>
+            ) : null}
+            {generationSupport.webgpu && !generationSupport.shaderF16 ? (
+              <output className="model-warning">
+                <AlertTriangle />
+                <p>
+                  <strong>Use Local compact on this device.</strong> The current
+                  GPU does not expose shader-f16, so the 360M quality profile is
+                  disabled.
+                </p>
+              </output>
+            ) : null}
             <label>
               <span>
                 <strong>Automatic exact corrections</strong>
@@ -1031,9 +1133,11 @@ export default function WriterApp() {
                 identification is multilingual. The shipped spelling dictionary
                 and WordNet reference are English; for other detected languages,
                 Invariant abstains from those checks rather than applying
-                English rules. The optional SmolLM2 assistant is also
-                English-first, requires WebGPU, downloads model assets from the
-                model host on first use, and may produce incorrect text.
+                English rules. Optional SmolLM2 profiles are also English-first,
+                require WebGPU, download model assets from the model host on
+                first use, and may produce incorrect text. If a model cannot
+                start, Invariant identifies the reason and falls back to
+                Document tools.
               </p>
             </div>
           </dialog>

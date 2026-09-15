@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2
+
+- Added a recommended SmolLM2 135M q4 profile that runs on a broader range of
+  WebGPU devices, while retaining the 360M q4f16 profile for GPUs that expose
+  `shader-f16`.
+- Replaced the superficial WebGPU property check with adapter and feature
+  preflight, profile-specific disabled states, and actionable capability notes.
+- Preserved numeric, object, and standard runtime failures instead of replacing
+  them with a generic model error.
+- Added local fallback to bounded Document tools when model initialization or
+  generation fails; no remote inference fallback is used.
+- Routed greetings, summaries, outlines, metrics, ratings, privacy, language,
+  and evidence-backed edits directly to the appropriate lightweight Leanlet so
+  they do not incur generative-model startup.
+
 ## 0.2.1
 
 - Added a visible, linked “Built with Leanlet” framework signature to the

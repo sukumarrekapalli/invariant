@@ -11,17 +11,19 @@ Invariant treats every intelligent behavior as a bounded Leanlet. Each contract 
 | `writer.english-rules` | text → exact edits | synchronous JavaScript | Runs explicit transformations. Only deterministic replacements are marked `safeToApply`. |
 | `writer.lexicon-en` | word → senses and relations | lazy static shard | English WordNet. Missing entries return `found: false`; no definition is generated. |
 | `writer.assistant` | question + draft + report + optional selection → answer or exact rewrite | synchronous JavaScript | Summarizes, outlines, retrieves passages, reports metrics, explains findings, and applies only evidence-backed exact edits. |
-| `writer.generate-smollm2-360m` | bounded document request → answer or proposed rewrite | lazy WebGPU worker | Optional English-first generation. Requires WebGPU, downloads a quantized model on first request, and always returns a reviewable proposal rather than mutating the draft. |
+| `writer.generate-smollm2-135m` | bounded document request → answer or proposed rewrite | lazy WebGPU worker | Recommended q4 compatibility profile. Downloads about 181 MB on first request. |
+| `writer.generate-smollm2-360m` | bounded document request → answer or proposed rewrite | lazy WebGPU worker | Higher-capacity q4f16 Preview profile. Requires WebGPU `shader-f16` and downloads about 272 MB. |
 
 ## Assistant engines
 
 `Document tools` is the default. It has no generation model and is suitable for
 the broadest set of devices. It can answer conversational questions about its
 scope and produce a bounded, evidence-explained draft rating, but abstains from
-emotional sentiment. `Local generative · Preview` is an explicit user choice; it
-registers an additional Leanlet with a larger declared memory budget. If WebGPU
-is unavailable, the interface disables that choice instead of implying a
-portable performance level the application cannot guarantee.
+emotional sentiment. Local profiles are explicit user choices and register an
+additional Leanlet with a larger declared memory budget. Invariant requests a
+real WebGPU adapter before enabling them; the 360M option also requires
+`shader-f16`. Failed initialization falls back to Document tools with a visible
+reason rather than silently using a server.
 
 Assistant replies name their `source` (`structured` or `generative`), `kind`
 (`answer`, `suggestion`, or `rewrite`), supporting finding IDs, optional caveat,

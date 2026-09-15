@@ -92,7 +92,10 @@ export type AssistantRequest = {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
 };
 
-export type AssistantEngineId = 'structured' | 'smollm2-360m';
+export type AssistantEngineId =
+  | 'structured'
+  | 'smollm2-135m'
+  | 'smollm2-360m';
 
 export const ASSISTANT_ENGINES: ReadonlyArray<{
   id: AssistantEngineId;
@@ -109,11 +112,18 @@ export const ASSISTANT_ENGINES: ReadonlyArray<{
     coverage: 'Language-neutral metrics; strongest with English review evidence',
   },
   {
+    id: 'smollm2-135m',
+    name: 'Local compact · Recommended',
+    detail: 'SmolLM2 135M Instruct q4 for broader WebGPU compatibility',
+    transfer: '~181 MB + runtime once',
+    coverage: 'English-first; lower capacity; generated output requires review',
+  },
+  {
     id: 'smollm2-360m',
-    name: 'Local generative · Preview',
-    detail: 'SmolLM2 360M Instruct for bounded rewrites and document questions',
+    name: 'Local quality · Preview',
+    detail: 'SmolLM2 360M Instruct q4f16 for capable GPUs',
     transfer: '~272 MB + runtime once',
-    coverage: 'English-first; generated output requires review',
+    coverage: 'English-first; requires shader-f16; generated output requires review',
   },
 ] as const;
 

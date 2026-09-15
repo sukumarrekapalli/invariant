@@ -29,7 +29,12 @@ import {
 import {
   answerFromDocument,
   isRewriteRequest,
+  isStructuredAssistantRequest,
 } from './document-assistant.ts';
+import {
+  LOCAL_GENERATION_PROFILES,
+  type LocalGenerationProfileId,
+} from './generation-support.ts';
 /* oxlint-disable import/default -- Vite's ?worker query provides constructor default exports. */
 import ExtraSmallLanguageWorker from './language-extrasmall.worker.ts?worker';
 import SmallLanguageWorker from './language-small.worker.ts?worker';
@@ -243,9 +248,8 @@ type GenerationWorkerMessage =
   | { type: 'error'; requestId: number; message: string };
 
 class GenerationClient {
-  private readonly worker = new GenerationWorker({
-    name: 'invariant-smollm2-360m',
-  });
+  private readonly worker: Worker;
+  private readonly profileId: LocalGenerationProfileId;
   private requestId = 0;
   private pending = new Map<
     number,
@@ -256,7 +260,11 @@ class GenerationClient {
     }
   >();
 
-  constructor() {
+  constructor(profileId: LocalGenerationProfileId) {
+    this.profileId = profileId;
+    this.worker = new GenerationWorker({
+      name: `invariant-${profileId}`,
+    });
     this.worker.onmessage = ({ data }: MessageEvent<GenerationWorkerMessage>) => {
       const pending = this.pending.get(data.requestId);
       if (!pending) return;
@@ -305,7 +313,12 @@ class GenerationClient {
         },
         progress,
       });
-      this.worker.postMessage({ type, requestId, request });
+      this.worker.postMessage({
+        type,
+        requestId,
+        profileId: this.profileId,
+        request,
+      });
     });
   }
 
@@ -333,16 +346,19 @@ export function createWriterRuntime(
   assistantEngine: AssistantEngineId = 'structured',
   onEvent?: (event: LeanletKernelEvent) => void,
 ) {
+  const generationProfile =
+    assistantEngine === 'structured'
+      ? undefined
+      : LOCAL_GENERATION_PROFILES[assistantEngine];
   const profile =
     LANGUAGE_PROFILES.find((item) => item.id === profileId) ??
     LANGUAGE_PROFILES[0];
   const kernel = createLeanletKernel({
     budget: {
       maxConcurrentRuns: 4,
-      maxResidentBytes:
-        assistantEngine === 'smollm2-360m'
-          ? 896 * 1024 * 1024
-          : 96 * 1024 * 1024,
+      maxResidentBytes: generationProfile
+        ? generationProfile.estimatedResidentBytes + 176 * 1024 * 1024
+        : 96 * 1024 * 1024,
       defaultDeadlineMs: 2_500,
     },
     policy: {
@@ -455,31 +471,28 @@ export function createWriterRuntime(
       run: (request) => accepted(answerFromDocument(request)),
     }),
   );
-  if (assistantEngine === 'smollm2-360m') {
+  if (generationProfile) {
     kernel.register(
       definition<AssistantRequest, AssistantReply, GenerationClient>({
         manifest: {
-          id: 'writer.generate-smollm2-360m',
+          id: generationProfile.leanletId,
           version: '0.1.0',
           task: 'bounded-document-assistance',
           description:
-            'Optional English-first document questions and rewrites in a WebGPU worker.',
+            `Optional English-first document questions and rewrites using ${generationProfile.label}.`,
           providers: ['webgpu'],
           network: 'static-assets',
-          estimatedResidentBytes: 720 * 1024 * 1024,
+          estimatedResidentBytes: generationProfile.estimatedResidentBytes,
           assets: [
             {
-              path: 'https://huggingface.co/onnx-community/SmolLM2-360M-Instruct-ONNX/resolve/fe7c7db/onnx/model_q4f16.onnx',
-              bytes: 272_353_302,
-              sha256:
-                'ed196149bd9f24de0aa78f2ce8c6fa1167f71de9857173d1a231a4cbc01fb1c0',
+              ...generationProfile.asset,
               license: 'Apache-2.0',
-              sourceRevision: 'fe7c7db',
+              sourceRevision: generationProfile.revision,
             },
           ],
         },
         load: async (context) => {
-          const client = new GenerationClient();
+          const client = new GenerationClient(generationProfile.id);
           try {
             await client.load(context.signal, (progress, status) =>
               context.emit({ phase: 'model-load', progress, status }),
@@ -628,9 +641,12 @@ export function createWriterRuntime(
       ASSISTANT_ENGINES[0],
     async ask(request: AssistantRequest, signal?: AbortSignal) {
       const rewrite = isRewriteRequest(request.question);
+      const useGeneration =
+        Boolean(generationProfile) &&
+        !isStructuredAssistantRequest(request.question);
       const targetLength = request.selection?.text.length ?? request.text.length;
       const inputLimit = request.selection ? 5_000 : 7_500;
-      if (assistantEngine === 'smollm2-360m' && rewrite && targetLength > inputLimit)
+      if (useGeneration && rewrite && targetLength > inputLimit)
         return {
           basisHash: stableTextHash(request.text),
           answer: `This rewrite target is ${targetLength.toLocaleString()} characters. The local model accepts at most ${inputLimit.toLocaleString()} characters for a reviewable rewrite; select a smaller passage.`,
@@ -641,24 +657,42 @@ export function createWriterRuntime(
           caveat: 'No model was loaded and no text was changed.',
         };
       const leanletId =
-        assistantEngine === 'smollm2-360m'
-          ? 'writer.generate-smollm2-360m'
+        useGeneration && generationProfile
+          ? generationProfile.leanletId
           : 'writer.assistant';
       const result = await kernel.run<AssistantRequest, AssistantReply>(
         leanletId,
         request,
         {
           signal,
-          deadlineMs: assistantEngine === 'smollm2-360m' ? 900_000 : 750,
+          deadlineMs: useGeneration ? 900_000 : 750,
           priority: 3,
         },
       );
-      if (result.status !== 'accepted')
+      if (result.status !== 'accepted') {
+        if (useGeneration && generationProfile) {
+          const reason =
+            result.status === 'failed'
+              ? result.error.message
+              : `The model abstained: ${result.reason.replaceAll('-', ' ')}.`;
+          const fallback = await kernel.run<AssistantRequest, AssistantReply>(
+            'writer.assistant',
+            request,
+            { signal, deadlineMs: 750, priority: 3 },
+          );
+          if (fallback.status === 'accepted')
+            return {
+              ...fallback.output,
+              caveat: `The selected local model was unavailable (${reason}) Invariant answered with its bounded Document tools instead.`,
+            };
+          throw new Error(`The local model was unavailable: ${reason}`);
+        }
         throw new Error(
           result.status === 'failed'
             ? result.error.message
             : `The local assistant abstained: ${result.reason}.`,
         );
+      }
       return result.output;
     },
     async lookupWord(word: string, signal?: AbortSignal) {

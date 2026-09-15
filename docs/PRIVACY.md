@@ -5,8 +5,8 @@ this repository. Same-origin requests retrieve application JavaScript, workers,
 language assets, and on-demand lexicon shards; they do not carry draft text as
 a query or request body.
 
-If the user selects Local generative, the browser fetches pinned SmolLM2 model
-and tokenizer files from Hugging Face on the first request. These are ordinary
+If the user selects a local model profile, the browser fetches pinned SmolLM2
+model and tokenizer files from Hugging Face on the first request. These are ordinary
 asset downloads: the draft is not placed in the URL, request body, headers, or
 model-host telemetry by Invariant. Generation then runs in a dedicated WebGPU
 worker. A model host can still observe normal connection metadata such as IP

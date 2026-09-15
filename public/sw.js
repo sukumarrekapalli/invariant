@@ -1,4 +1,4 @@
-const CACHE = 'invariant-runtime-v2';
+const CACHE = 'invariant-runtime-v3';
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('invariant-') && key !== CACHE).map((key) => caches.delete(key)))));
