@@ -1,0 +1,10 @@
+{
+  "name": "Invariant",
+  "short_name": "Invariant",
+  "description": "Private writing intelligence in your browser.",
+  "start_url": "./writer/",
+  "display": "standalone",
+  "background_color": "#f3f0e8",
+  "theme_color": "#202321",
+  "icons": [{ "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
