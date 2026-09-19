@@ -30,6 +30,10 @@ import {
 import { createWriterRuntime, type WriterRuntime } from '@/lib/writer-runtime';
 import { stableTextHash } from '@/lib/analyzers';
 import {
+  inspectGenerationSupport,
+  type GenerationSupport,
+} from '@/lib/generation-support';
+import {
   ASSISTANT_ENGINES,
   LANGUAGE_PROFILES,
   type AssistantEngineId,
@@ -52,7 +56,7 @@ type DocumentRecord = {
 type ReviewTab = 'suggestions' | 'words' | 'assistant';
 type MobileDrawer = 'library' | 'review' | null;
 type Status = 'ready' | 'analyzing' | 'error';
-type GenerationSupport = {
+type PendingGenerationSupport = {
   checked: boolean;
   webgpu: boolean;
   shaderF16: boolean;
@@ -124,7 +128,7 @@ export default function WriterApp() {
   const [assistantStatus, setAssistantStatus] = useState('Ready');
   const [assistantProgress, setAssistantProgress] = useState<number>();
   const [generationSupport, setGenerationSupport] =
-    useState<GenerationSupport>({
+    useState<GenerationSupport | PendingGenerationSupport>({
       checked: false,
       webgpu: false,
       shaderF16: false,
@@ -167,58 +171,9 @@ export default function WriterApp() {
   }, []);
   useEffect(() => {
     let active = true;
-    const inspect = async () => {
-      const gpu = (
-        navigator as unknown as {
-          gpu?: {
-            requestAdapter(): Promise<{
-              features: { has(name: string): boolean };
-            } | null>;
-          };
-        }
-      ).gpu;
-      if (!gpu) {
-        if (active)
-          setGenerationSupport({
-            checked: true,
-            webgpu: false,
-            shaderF16: false,
-            reason: 'WebGPU is not exposed by this browser.',
-          });
-        return;
-      }
-      try {
-        const adapter = await gpu.requestAdapter();
-        if (!active) return;
-        if (!adapter) {
-          setGenerationSupport({
-            checked: true,
-            webgpu: false,
-            shaderF16: false,
-            reason:
-              'No WebGPU adapter is available. Hardware acceleration may be disabled.',
-          });
-          return;
-        }
-        setGenerationSupport({
-          checked: true,
-          webgpu: true,
-          shaderF16: adapter.features.has('shader-f16'),
-        });
-      } catch (caught) {
-        if (active)
-          setGenerationSupport({
-            checked: true,
-            webgpu: false,
-            shaderF16: false,
-            reason:
-              caught instanceof Error
-                ? caught.message
-                : 'WebGPU capability detection failed.',
-          });
-      }
-    };
-    void inspect();
+    void inspectGenerationSupport().then((support) => {
+      if (active) setGenerationSupport(support);
+    });
     return () => {
       active = false;
     };
