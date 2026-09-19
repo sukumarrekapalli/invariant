@@ -1,10 +1,12 @@
 import {
+  defineCapabilityRoute,
   matchesRuntimeRequirements,
   probeRuntimeCapabilities,
   type LeanletRuntimeCapabilities,
   type LeanletRuntimeRequirements,
   type RuntimeCapabilityProbeOptions,
 } from 'leanlet-ai/kernel';
+import type { AssistantReply, AssistantRequest } from './writer-types.ts';
 
 export type LocalGenerationProfileId = 'smollm2-135m' | 'smollm2-360m';
 
@@ -99,6 +101,27 @@ export async function inspectGenerationSupport(
     },
     reason,
   };
+}
+
+export function createAssistantCapabilityRoute(
+  profileId?: LocalGenerationProfileId,
+) {
+  const profile = profileId
+    ? LOCAL_GENERATION_PROFILES[profileId]
+    : undefined;
+  return defineCapabilityRoute<AssistantRequest, AssistantReply>({
+    id: 'writer.assistant-route',
+    candidates: profile
+      ? [
+          {
+            leanletId: profile.leanletId,
+            requires: profile.requirements,
+            continueOn: ['failed', 'abstained'],
+          },
+          { leanletId: 'writer.assistant' },
+        ]
+      : [{ leanletId: 'writer.assistant' }],
+  });
 }
 
 export function describeGenerationError(error: unknown) {

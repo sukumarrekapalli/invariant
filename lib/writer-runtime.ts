@@ -2,6 +2,7 @@ import {
   accepted,
   createLeanletKernel,
   defineFlow,
+  probeRuntimeCapabilities,
   type KernelLeanletDefinition,
   type LeanletKernelEvent,
   type LeanletResult,
@@ -32,6 +33,7 @@ import {
   isStructuredAssistantRequest,
 } from './document-assistant.ts';
 import {
+  createAssistantCapabilityRoute,
   LOCAL_GENERATION_PROFILES,
   type LocalGenerationProfileId,
 } from './generation-support.ts';
@@ -350,6 +352,10 @@ export function createWriterRuntime(
     assistantEngine === 'structured'
       ? undefined
       : LOCAL_GENERATION_PROFILES[assistantEngine];
+  const assistantRoute = createAssistantCapabilityRoute(
+    generationProfile?.id,
+  );
+  const runtimeCapabilities = probeRuntimeCapabilities();
   const profile =
     LANGUAGE_PROFILES.find((item) => item.id === profileId) ??
     LANGUAGE_PROFILES[0];
@@ -656,42 +662,45 @@ export function createWriterRuntime(
           kind: 'rewrite' as const,
           caveat: 'No model was loaded and no text was changed.',
         };
-      const leanletId =
-        useGeneration && generationProfile
-          ? generationProfile.leanletId
-          : 'writer.assistant';
-      const result = await kernel.run<AssistantRequest, AssistantReply>(
-        leanletId,
+      const route = useGeneration
+        ? assistantRoute
+        : createAssistantCapabilityRoute();
+      const outcome = await route.run(
+        kernel,
         request,
         {
           signal,
           deadlineMs: useGeneration ? 900_000 : 750,
           priority: 3,
+          capabilities: await runtimeCapabilities,
         },
       );
+      const result = outcome.result;
       if (result.status !== 'accepted') {
-        if (useGeneration && generationProfile) {
-          const reason =
-            result.status === 'failed'
-              ? result.error.message
-              : `The model abstained: ${result.reason.replaceAll('-', ' ')}.`;
-          const fallback = await kernel.run<AssistantRequest, AssistantReply>(
-            'writer.assistant',
-            request,
-            { signal, deadlineMs: 750, priority: 3 },
-          );
-          if (fallback.status === 'accepted')
-            return {
-              ...fallback.output,
-              caveat: `The selected local model was unavailable (${reason}) Invariant answered with its bounded Document tools instead.`,
-            };
-          throw new Error(`The local model was unavailable: ${reason}`);
-        }
         throw new Error(
           result.status === 'failed'
             ? result.error.message
             : `The local assistant abstained: ${result.reason}.`,
         );
+      }
+      if (
+        useGeneration &&
+        generationProfile &&
+        outcome.selectedLeanletId === 'writer.assistant'
+      ) {
+        const primary = outcome.attempts[0];
+        const reason =
+          primary?.status === 'incompatible'
+            ? `missing ${primary.missing.join(', ')}`
+            : primary?.result.status === 'failed'
+              ? primary.result.error.message
+              : primary?.result.status === 'abstained'
+                ? primary.result.reason.replaceAll('-', ' ')
+                : 'the selected model was unavailable';
+        return {
+          ...result.output,
+          caveat: `The selected local model was unavailable (${reason}). Invariant answered with its bounded Document tools instead.`,
+        };
       }
       return result.output;
     },
