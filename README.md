@@ -67,9 +67,10 @@ The structured assistant is the default because it is immediate, inspectable,
 and broadly compatible. Local generation is opt-in: it requires a usable WebGPU
 adapter and downloads roughly 181 MB or 272 MB of quantized weights plus
 tokenizer/runtime files. Both profiles are English-first and may be inaccurate.
-Invariant preflights compatibility, reports initialization failures, and falls
-back to bounded Document tools. Draft text is sent to neither an inference
-endpoint nor the model host.
+Invariant preflights compatibility and reports initialization failures. An
+explicit Leanlet capability route falls back to bounded Document tools while
+recording incompatible candidates and failed attempts. Draft text is sent to
+neither an inference endpoint nor the model host.
 
 ## Documentation
 

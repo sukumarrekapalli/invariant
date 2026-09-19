@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3
+
+- Adopted Leanlet 0.3.0-beta.5 runtime capability profiles instead of keeping
+  an application-specific WebGPU probe.
+- Declared each local generation profile's runtime requirements through the
+  framework, including the quality profile's `shader-f16` requirement.
+- Replaced manual model-to-document-tools recovery with an explicit Leanlet
+  capability route. Incompatible skips, failed attempts, selected fallback,
+  cancellation, and one shared deadline are now part of the route result.
+- Kept generated output opt-in and author-reviewed. The structured assistant
+  remains the default and no remote inference fallback was added.
+
 ## 0.2.2
 
 - Added a recommended SmolLM2 135M q4 profile that runs on a broader range of
