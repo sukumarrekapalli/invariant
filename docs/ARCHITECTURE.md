@@ -48,17 +48,20 @@ Their workers request a real GPU adapter, report asset progress and failures
 through kernel diagnostics, and receive only the current document, optional
 selection, and bounded instruction. If initialization fails, the request is
 routed to `writer.assistant` and the response identifies that fallback.
+Compatibility is derived from Leanlet's privacy-minimal runtime capability
+profile. The ordered route declares requirements and `continueOn` statuses;
+its result retains incompatible skips, failed/abstained executions, the
+selected Leanlet, and whether fallback occurred. Cancellation and one overall
+deadline apply across the route.
 Greetings, summaries, outlines, metrics, ratings, privacy questions, language
 questions, and evidence-backed edit requests route directly to
 `writer.assistant`; selecting a local model does not make those bounded intents
 pay model startup or generation cost.
 
-Product checks are application contracts rather than hidden prompts. The next
-Leanlet package line exposes `defineCheck()` and `runCheck()` so a check maps
-document state to a registered deterministic or model-backed Leanlet while
-retaining kernel scheduling, abstention, timing, and provenance. Invariant's
-current review flow will move to that public contract after the package release
-is published.
+Product checks are application contracts rather than hidden prompts.
+`defineCheck()` and `runCheck()` map document state to a registered
+deterministic or model-backed Leanlet while retaining kernel scheduling,
+abstention, timing, and provenance.
 
 ## Persistence
 

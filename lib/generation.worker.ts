@@ -54,9 +54,13 @@ async function load(requestId: number, profileId: LocalGenerationProfileId) {
     throw new Error(
       'The browser could not acquire a WebGPU adapter. Use Document tools or try a browser with hardware acceleration enabled.',
     );
-  if (profile.requiresShaderF16 && !adapter.features.has('shader-f16'))
+  const requiredFeatures = profile.requirements.webgpuFeatures ?? [];
+  const missingFeatures = requiredFeatures.filter(
+    (feature) => !adapter.features.has(feature),
+  );
+  if (missingFeatures.length)
     throw new Error(
-      'This GPU does not expose shader-f16, which the 360M profile requires. Select Local compact instead.',
+      `This GPU does not expose ${missingFeatures.join(', ')}, which ${profile.label} requires. Select a compatible profile instead.`,
     );
   // This profile is remote-first. Enabling local lookup against a SPA host can
   // return index.html for missing model metadata and fail JSON parsing.

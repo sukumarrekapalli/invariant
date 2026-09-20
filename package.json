@@ -1,6 +1,6 @@
 {
   "name": "invariant-writer",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Private, intrinsically intelligent writing feedback powered by local Leanlets.",
   "license": "Apache-2.0",
@@ -21,7 +21,7 @@
     "@huggingface/transformers": "3.8.1",
     "dictionary-en": "^4.0.0",
     "eld": "^2.1.0",
-    "leanlet-ai": "0.3.0-beta.2",
+    "leanlet-ai": "0.3.0-beta.5",
     "lucide-react": "1.31.0",
     "nspell": "^2.1.5",
     "react": "19.2.6",

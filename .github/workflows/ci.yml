@@ -1,0 +1,28 @@
+name: Validate Invariant
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_BASE_PATH: /invariant/
+          VITE_SITE_URL: https://sukumarrekapalli.github.io/invariant
